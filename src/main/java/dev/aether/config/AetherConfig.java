@@ -359,6 +359,7 @@ public final class AetherConfig {
                         .range(0, 5000);
         public static final IntEntry PEST_CHAT_TRIGGER_DELAY_MAX = Config.integer("pestChatTriggerDelayMax", 3000)
                         .range(0, 5000);
+        public static final BooleanEntry PEST_DESTROYER_WALK_MODE = Config.bool("pestDestroyerWalkMode", false);
         public static final BooleanEntry DELAY_PEST_FOR_CROP_FEVER = Config.bool("delayPestForCropFever", false);
         public static final BooleanEntry PEST_ON_TRACK_ENABLED = Config.bool("pestOnTrackEnabled", false);
         // start: farmhelper ish pest on track
