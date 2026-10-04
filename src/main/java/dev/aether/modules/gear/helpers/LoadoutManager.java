@@ -8,6 +8,7 @@ import dev.aether.macro.MacroWorkerThread;
 import dev.aether.modules.gear.GearManager;
 import dev.aether.modules.pest.PestManager;
 import dev.aether.modules.pest.helpers.AutoPestExchangeManager;
+import dev.aether.modules.pest.helpers.PestLifecycleManager;
 import dev.aether.modules.session.RestartManager;
 import dev.aether.util.ClientUtils;
 import net.minecraft.client.Minecraft;
@@ -20,6 +21,7 @@ public class LoadoutManager {
     private static final long WARDROBE_STRAND_TIMEOUT_MS = 5_000L;
 
     private static volatile long wardrobeIdleSinceMs = 0L;
+    private static volatile long guiClosePendingSinceMs = 0L;
 
     public static volatile boolean isSwappingLoadout = false;
     public static volatile long loadoutInteractionTime = 0;
@@ -52,11 +54,34 @@ public class LoadoutManager {
         loadoutTimelineStartTime = 0;
         loadoutChatConfirmed = false;
         wardrobeIdleSinceMs = 0L;
+        guiClosePendingSinceMs = 0L;
+    }
+
+    // pest triggers wait on loadoutGuiCloseComplete, so a close future that never fires would block them for good
+    private static void tickGuiCloseWatchdog() {
+        if (isSwappingLoadout || loadoutGuiCloseComplete) {
+            guiClosePendingSinceMs = 0L;
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if (guiClosePendingSinceMs == 0L) {
+            guiClosePendingSinceMs = now;
+            return;
+        }
+        if (now - guiClosePendingSinceMs < WARDROBE_STRAND_TIMEOUT_MS) {
+            return;
+        }
+
+        guiClosePendingSinceMs = 0L;
+        loadoutGuiCloseComplete = true;
+        logSwapFlags("gui close watchdog");
     }
 
     // WARDROBE is only cleared by a swap that completes or aborts; any path that drops one on the
     // floor strands the state and silently kills every pest trigger until a relog
     public static void tickWardrobeWatchdog() {
+        tickGuiCloseWatchdog();
         if (isSwappingLoadout
                 || !loadoutGuiCloseComplete
                 || loadoutCleanupTicks > 0
@@ -91,7 +116,7 @@ public class LoadoutManager {
         }
         if (trackedLoadoutSlot == slot) {
             ClientUtils.sendDebugMessage("Loadout already on target slot, restarting farming");
-            client.execute(() -> FarmingMacroManager.disable(client));
+            client.execute(() -> FarmingMacroManager.disable(client, "LoadoutManager.triggerLoadoutSwap(already on slot)"));
             MacroWorkerThread.getInstance().submit("Wardrobe-AlreadyOnSlot-FastResume", () -> {
                 if (MacroWorkerThread.shouldAbortTask(client, MacroState.State.FARMING)) {
                     return;
@@ -116,8 +141,14 @@ public class LoadoutManager {
                     return;
                 }
                 ClientUtils.sendDebugMessage("Restarting farming macro after loadout swap");
-                client.execute(() -> FarmingMacroManager.enable(client,
-                        FarmingMacroManager.createMacroFromConfig()));
+                client.execute(() -> {
+                    if (PestLifecycleManager.blocksFarmingResume()) {
+                        ClientUtils.sendDebugMessage("Loadout fast resume skipped: pest cycle active.");
+                        return;
+                    }
+                    FarmingMacroManager.enable(client, FarmingMacroManager.createMacroFromConfig(),
+                            "LoadoutManager.triggerLoadoutSwap(already on slot)");
+                });
             });
             return;
         }
@@ -136,7 +167,8 @@ public class LoadoutManager {
         shouldRestartFarmingAfterSwap = true;
         MacroStateManager.setCurrentState(MacroState.State.WARDROBE);
         ClientUtils.sendDebugMessage("Triggering loadout swap to slot " + slot);
-        client.execute(() -> FarmingMacroManager.disable(client));
+        logSwapFlags("triggerLoadoutSwap");
+        client.execute(() -> FarmingMacroManager.disable(client, "LoadoutManager.triggerLoadoutSwap"));
         ClientUtils.scheduleClientTask(client, 400L, () -> {
             if (isSwappingLoadout && targetLoadoutSlot == slot && loadoutRequestId == requestId) {
                 ClientUtils.sendCommand("/loadout");
@@ -162,6 +194,7 @@ public class LoadoutManager {
         loadoutOpenPendingTime = 0;
         loadoutFirstClickDelayMs = 0;
         loadoutChatConfirmed = false;
+        logSwapFlags("ensureLoadoutSlot(" + slot + ")");
         ClientUtils.sendCommand("/loadout");
     }
 
@@ -198,6 +231,7 @@ public class LoadoutManager {
         ClientUtils.sendDebugMessage("Aborted loadout swap because " + taskName + " has priority.");
         ClientUtils.closeGui(client);
         loadoutGuiCloseComplete = true;
+        logSwapFlags("abortSwapForPriorityTask");
     }
 
     public static void handleLoadoutMenu(Minecraft client, AbstractContainerScreen<?> screen) {
@@ -285,10 +319,12 @@ public class LoadoutManager {
         loadoutChatConfirmed = false;
         loadoutOpenPendingTime = 0;
         loadoutFirstClickDelayMs = 0;
+        logSwapFlags("finishLoadoutAfterClick");
 
         sendTimedDebug(client, "Loadout GUI close requested", now);
         ClientUtils.closeGuiAsync(client).thenRun(() -> {
             loadoutGuiCloseComplete = true;
+            logSwapFlags("gui close complete");
             sendTimedDebug(client, "Loadout swap complete. Active slot is now " + trackedLoadoutSlot,
                     System.currentTimeMillis());
             handleLoadoutCompletion(client);
@@ -327,7 +363,9 @@ public class LoadoutManager {
             if (MacroWorkerThread.shouldAbortTask(client, MacroState.State.FARMING)) {
                 return;
             }
-            if (PestManager.isCleaningInProgress()) {
+            if (PestLifecycleManager.blocksFarmingResume()) {
+                ClientUtils.sendDebugMessage("Loadout completion resume skipped: pest cycle active (stage="
+                        + PestLifecycleManager.getStage() + ").");
                 return;
             }
             if (AutoPestExchangeManager.shouldBlockFarmingResume()) {
@@ -347,8 +385,10 @@ public class LoadoutManager {
             loadoutInteractionStage = 0;
             loadoutOpenPendingTime = 0;
             loadoutFirstClickDelayMs = 0;
+            logSwapFlags("completion failsafe");
             ClientUtils.closeGuiAsync(client).thenRun(() -> {
                 loadoutGuiCloseComplete = true;
+                logSwapFlags("failsafe gui close complete");
                 handleLoadoutCompletion(client);
             });
         }
@@ -361,6 +401,11 @@ public class LoadoutManager {
         int row = (loadoutSlot - 1) / 3;
         int column = (loadoutSlot - 1) % 3;
         return 14 + row * 9 + column;
+    }
+
+    private static void logSwapFlags(String where) {
+        ClientUtils.sendDebugMessage("Loadout flags after " + where + ": isSwappingLoadout=" + isSwappingLoadout
+                + ", loadoutGuiCloseComplete=" + loadoutGuiCloseComplete + ".");
     }
 
     private static void sendTimedDebug(Minecraft client, String action, long now) {
