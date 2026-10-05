@@ -25,13 +25,10 @@ class PestLifecycleManagerTest {
     @Test
     void startsPestCycleOnlyWhenIdleAndNoLoadoutSwapIsInFlight() {
         PestLifecycleManager.Stage idle = PestLifecycleManager.Stage.IDLE;
-        assertNull(PestLifecycleManager.startRejectionReason(idle, false, false, false, true));
-        assertNotNull(PestLifecycleManager.startRejectionReason(
-                PestLifecycleManager.Stage.PRE, false, false, false, true));
-        assertNotNull(PestLifecycleManager.startRejectionReason(idle, true, false, false, true));
-        assertNotNull(PestLifecycleManager.startRejectionReason(idle, false, true, false, true));
-        assertNotNull(PestLifecycleManager.startRejectionReason(idle, false, false, true, true));
-        assertNotNull(PestLifecycleManager.startRejectionReason(idle, false, false, false, false));
+        assertNull(PestLifecycleManager.startRejectionReason(idle, false, false));
+        assertNotNull(PestLifecycleManager.startRejectionReason(PestLifecycleManager.Stage.PRE, false, false));
+        assertNotNull(PestLifecycleManager.startRejectionReason(idle, true, false));
+        assertNotNull(PestLifecycleManager.startRejectionReason(idle, false, true));
     }
 
     @Test

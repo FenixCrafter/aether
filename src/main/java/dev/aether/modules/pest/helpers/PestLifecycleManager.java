@@ -142,8 +142,7 @@ public final class PestLifecycleManager {
 
     public static boolean start(Minecraft client, String plot, int pestCount, int sessionId) {
         String rejection = startRejectionReason(stage, PestManager.isCleaningInProgress(),
-                PestPrepSwapManager.isPrepSwapping(), LoadoutManager.isSwappingLoadout,
-                LoadoutManager.loadoutGuiCloseComplete);
+                LoadoutManager.isSwappingLoadout);
         if (rejection != null) {
             ClientUtils.sendDebugMessage("Pest lifecycle: start rejected for plot " + plot + " (" + rejection + ").");
             PestManager.clearCleaningTriggerPending();
@@ -193,23 +192,15 @@ public final class PestLifecycleManager {
         return true;
     }
 
-    // a swap still closing its gui would schedule its own farming resume on top of the pest cycle
-    static String startRejectionReason(Stage currentStage, boolean cleaning, boolean prepSwapping,
-            boolean swappingLoadout, boolean loadoutGuiCloseComplete) {
+    static String startRejectionReason(Stage currentStage, boolean cleaning, boolean swappingLoadout) {
         if (currentStage != Stage.IDLE) {
             return "stage=" + currentStage;
         }
         if (cleaning) {
             return "cleaning in progress";
         }
-        if (prepSwapping) {
-            return "prep swap active";
-        }
         if (swappingLoadout) {
             return "loadout swap active";
-        }
-        if (!loadoutGuiCloseComplete) {
-            return "loadout gui still closing";
         }
         return null;
     }

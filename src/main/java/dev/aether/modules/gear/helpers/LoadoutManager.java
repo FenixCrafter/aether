@@ -75,7 +75,6 @@ public class LoadoutManager {
 
         guiClosePendingSinceMs = 0L;
         loadoutGuiCloseComplete = true;
-        logSwapFlags("gui close watchdog");
     }
 
     // WARDROBE is only cleared by a swap that completes or aborts; any path that drops one on the
@@ -143,7 +142,6 @@ public class LoadoutManager {
                 ClientUtils.sendDebugMessage("Restarting farming macro after loadout swap");
                 client.execute(() -> {
                     if (PestLifecycleManager.blocksFarmingResume()) {
-                        ClientUtils.sendDebugMessage("Loadout fast resume skipped: pest cycle active.");
                         return;
                     }
                     FarmingMacroManager.enable(client, FarmingMacroManager.createMacroFromConfig(),
@@ -167,7 +165,6 @@ public class LoadoutManager {
         shouldRestartFarmingAfterSwap = true;
         MacroStateManager.setCurrentState(MacroState.State.WARDROBE);
         ClientUtils.sendDebugMessage("Triggering loadout swap to slot " + slot);
-        logSwapFlags("triggerLoadoutSwap");
         client.execute(() -> FarmingMacroManager.disable(client, "LoadoutManager.triggerLoadoutSwap"));
         ClientUtils.scheduleClientTask(client, 400L, () -> {
             if (isSwappingLoadout && targetLoadoutSlot == slot && loadoutRequestId == requestId) {
@@ -194,7 +191,6 @@ public class LoadoutManager {
         loadoutOpenPendingTime = 0;
         loadoutFirstClickDelayMs = 0;
         loadoutChatConfirmed = false;
-        logSwapFlags("ensureLoadoutSlot(" + slot + ")");
         ClientUtils.sendCommand("/loadout");
     }
 
@@ -231,7 +227,6 @@ public class LoadoutManager {
         ClientUtils.sendDebugMessage("Aborted loadout swap because " + taskName + " has priority.");
         ClientUtils.closeGui(client);
         loadoutGuiCloseComplete = true;
-        logSwapFlags("abortSwapForPriorityTask");
     }
 
     public static void handleLoadoutMenu(Minecraft client, AbstractContainerScreen<?> screen) {
@@ -319,12 +314,10 @@ public class LoadoutManager {
         loadoutChatConfirmed = false;
         loadoutOpenPendingTime = 0;
         loadoutFirstClickDelayMs = 0;
-        logSwapFlags("finishLoadoutAfterClick");
 
         sendTimedDebug(client, "Loadout GUI close requested", now);
         ClientUtils.closeGuiAsync(client).thenRun(() -> {
             loadoutGuiCloseComplete = true;
-            logSwapFlags("gui close complete");
             sendTimedDebug(client, "Loadout swap complete. Active slot is now " + trackedLoadoutSlot,
                     System.currentTimeMillis());
             handleLoadoutCompletion(client);
@@ -364,8 +357,6 @@ public class LoadoutManager {
                 return;
             }
             if (PestLifecycleManager.blocksFarmingResume()) {
-                ClientUtils.sendDebugMessage("Loadout completion resume skipped: pest cycle active (stage="
-                        + PestLifecycleManager.getStage() + ").");
                 return;
             }
             if (AutoPestExchangeManager.shouldBlockFarmingResume()) {
@@ -385,10 +376,8 @@ public class LoadoutManager {
             loadoutInteractionStage = 0;
             loadoutOpenPendingTime = 0;
             loadoutFirstClickDelayMs = 0;
-            logSwapFlags("completion failsafe");
             ClientUtils.closeGuiAsync(client).thenRun(() -> {
                 loadoutGuiCloseComplete = true;
-                logSwapFlags("failsafe gui close complete");
                 handleLoadoutCompletion(client);
             });
         }
@@ -401,11 +390,6 @@ public class LoadoutManager {
         int row = (loadoutSlot - 1) / 3;
         int column = (loadoutSlot - 1) % 3;
         return 14 + row * 9 + column;
-    }
-
-    private static void logSwapFlags(String where) {
-        ClientUtils.sendDebugMessage("Loadout flags after " + where + ": isSwappingLoadout=" + isSwappingLoadout
-                + ", loadoutGuiCloseComplete=" + loadoutGuiCloseComplete + ".");
     }
 
     private static void sendTimedDebug(Minecraft client, String action, long now) {
